@@ -9,8 +9,8 @@ from typing import List, Dict, Any
 # ================================================================
 
 # --- Geometria do robô ---
-WHEEL_DIAMETER_M = 0.022   # 22 mm
-WHEEL_BASE_M = 0.120       # 120 mm
+WHEEL_DIAMETER_M = 22   # 22 mm
+WHEEL_BASE_M = 120       # 120 mm
 
 
 # --- Transmissão ---

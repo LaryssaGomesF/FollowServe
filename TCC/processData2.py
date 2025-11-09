@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 # ================================================================
 
 # --- Geometria do robô ---
-WHEEL_DIAMETER_M = 0.022   # 22 mm
+WHEEL_DIAMETER_M = 0.022  # 22 mm
 WHEEL_RADIUS_M = WHEEL_DIAMETER_M / 2.0
 WHEEL_BASE_M = 0.120       # 120 mm
 
@@ -142,7 +142,7 @@ def compute_odometry_pure(df: pd.DataFrame) -> pd.DataFrame:
         # --- CORREÇÃO PARA PEQUENOS DELTA_LAPS (Ruído/Quantização) ---
         # Se a variação for muito pequena, assume-se que o robô não se moveu.
         # O valor 0.0001 é um limiar arbitrário em voltas, pode precisar de ajuste.
-        THRESHOLD_LAPS = 0.695
+        THRESHOLD_LAPS = 0.25
         
         if abs(delta_laps_R) < THRESHOLD_LAPS and abs(delta_laps_L) < THRESHOLD_LAPS:
             dist_R = 0.0
