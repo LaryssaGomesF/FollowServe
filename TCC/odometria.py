@@ -20,8 +20,8 @@ GEAR_RATIO = 1.538
 WHEEL_CIRCUMFERENCE_MM = 2.0 * math.pi * WHEEL_RADIUS_MM
 
 # --- Caminhos de arquivos ---
-LOG_FILE = "../data/log.txt"
-OUTPUT_DIR = "../data/odometria"
+LOG_FILE = "./data/log.txt"
+OUTPUT_DIR = "./data/odometria"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ================================================================
@@ -169,7 +169,7 @@ def main():
   
     odom_file = os.path.join(OUTPUT_DIR, "odometry_mm.csv")
     df_odom.to_csv(odom_file, index=False)
-    plot_trajectories(df_odom, "../data/odometria/odometry_image")
+    plot_trajectories(df_odom, "./data/odometria/odometry_image")
     print(f"Dados de odometria salvos em: {odom_file}")
 
 if __name__ == "__main__":
