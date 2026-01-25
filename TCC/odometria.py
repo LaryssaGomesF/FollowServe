@@ -12,7 +12,7 @@ from typing import List, Dict, Any
 # --- Geometria do robô ---
 WHEEL_DIAMETER_MM = 22.0
 WHEEL_RADIUS_MM = WHEEL_DIAMETER_MM / 2.0
-WHEEL_BASE_MM = 120.0
+WHEEL_BASE_MM = 145.0
 
 # --- Transmissão ---
 # O GEAR_RATIO é necessário, pois o encoder está no motor.

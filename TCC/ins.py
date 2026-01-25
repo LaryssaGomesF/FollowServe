@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import os
 from typing import List, Dict, Any
 from scipy.integrate import cumulative_trapezoid
+from scipy.signal import butter, filtfilt
 
 # ================================================================
 # 1. PARÂMETROS FÍSICOS E DE CALIBRAÇÃO
@@ -89,49 +90,63 @@ def load_log_data(filepath: str) -> pd.DataFrame:
     return df
 
 # ================================================================
+# 3. FILTRO PASSA-BAIXA
+# ================================================================
+
+def apply_low_pass_filter(data, cutoff_freq, fs, order=2):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff_freq / nyq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    return filtfilt(b, a, data)
+
+# ================================================================
 # 3. CÁLCULO DE INS
 # ================================================================
 
 def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
-    """INS Pura usando timestamp em microsegundos direto."""
+    """INS Pura usando a Regra Trapezoidal e Filtro Passa-Baixa."""
     df_ins = df.copy()
-    df_ins['x_ins'] = 0.0
-    df_ins['y_ins'] = 0.0
-    df_ins['theta_ins'] = 0.0
+    
+    # --- PASSO 0: Configuração do Filtro ---
+    # Calculamos a frequência de amostragem (fs) real baseada no log
+    dt_mean = df_ins['timestamp'].diff().mean() * 1e-6
+    fs = 1.0 / dt_mean
+    cutoff = 5.0  # Frequência de corte (5Hz é bom para vibração de motores)
 
-    # Conversão do giro para rad/s
+    # --- PASSO 1: Aplicação do Filtro nos dados brutos ---
+    # Filtramos o giro e as acelerações ANTES de começar os cálculos
+    df_ins['gyro_z_dps'] = apply_low_pass_filter(df_ins['gyro_z_dps'].values, cutoff, fs)
+    df_ins['accel_x_ms2'] = apply_low_pass_filter(df_ins['accel_x_ms2'].values, cutoff, fs)
+    df_ins['accel_y_ms2'] = apply_low_pass_filter(df_ins['accel_y_ms2'].values, cutoff, fs)
+
+    # 1. Preparação dos dados (agora já filtrados)
     gyro_rad_s = np.radians(df_ins['gyro_z_dps'].to_numpy())
+    time_s = df_ins['timestamp'].to_numpy() * 1e-6 
 
-    # Timestamp em µs
-    time_us = df_ins['timestamp'].to_numpy()
-    dt_s = np.diff(time_us, prepend=time_us[0]) * 1e-6  # dt em segundos
-
-    # Integração do ângulo
-    theta = cumulative_trapezoid(gyro_rad_s, dx=1.0, initial=0.0)  # dx=1 porque vamos multiplicar por dt_s
-    theta = np.cumsum(gyro_rad_s * dt_s)  # equivalente à integração contínua
+    # 2. Integração do ângulo (Giroscópio -> Theta)
+    theta = cumulative_trapezoid(gyro_rad_s, x=time_s, initial=0.0)
     df_ins['theta_ins'] = theta
 
-    # Rotação das acelerações para o referencial global
+    # 3. Rotação das acelerações para o referencial global
     ax = df_ins['accel_x_ms2'].to_numpy()
     ay = df_ins['accel_y_ms2'].to_numpy()
-
+    
     ax_global = ax * np.cos(theta) - ay * np.sin(theta)
     ay_global = ax * np.sin(theta) + ay * np.cos(theta)
 
-    # Integração da aceleração → velocidade
-    vx = np.cumsum(ax_global * dt_s)
-    vy = np.cumsum(ay_global * dt_s)
+    # 4. Integração da aceleração -> velocidade
+    vx = cumulative_trapezoid(ax_global, x=time_s, initial=0.0)
+    vy = cumulative_trapezoid(ay_global, x=time_s, initial=0.0)
 
-    # Integração da velocidade → posição (em metros)
-    x_m = np.cumsum(vx * dt_s)
-    y_m = np.cumsum(vy * dt_s)
+    # 5. Integração da velocidade -> posição (em metros)
+    x_m = cumulative_trapezoid(vx, x=time_s, initial=0.0)
+    y_m = cumulative_trapezoid(vy, x=time_s, initial=0.0)
 
-    # Converter para mm
+    # 6. Conversão para mm
     df_ins['x_ins'] = x_m * 1000.0
     df_ins['y_ins'] = y_m * 1000.0
 
     return df_ins
-
 # ================================================================
 # 4. PLOTAGEM
 # ================================================================
