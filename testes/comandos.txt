@@ -1,1 +1,4 @@
 C:\Windows\System32>python -m pip install pandas
+
+mosquitto -c follow_mosquitto.conf -v
+mosquitto_sub -h localhost -t "robot/sensors" -v

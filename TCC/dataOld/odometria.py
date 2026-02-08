@@ -39,8 +39,8 @@ def map_reading_to_dict(reading: List[Any]) -> Dict[str, Any]:
 
     return {
         'timestamp': reading[0],
-        'encoderR': reading[-2],  
-        'encoderL': reading[-1],  
+        'encoderR': reading[-2],  # penúltima posição (Ângulo Acumulado R em Graus)
+        'encoderL': reading[-1],  # última posição (Ângulo Acumulado L em Graus)
     }
 
 
@@ -71,7 +71,7 @@ def load_log_data(filepath: str) -> pd.DataFrame:
 # 3. CÁLCULO DE ODOMETRIA
 # ================================================================
 
-def compute_odometry_pure(df: pd.DataFrame) -> pd.DataFrame:
+def compute_odometry_pure(df: pd.DataFrame, window_size: int = 10, alpha: float = 0.3) -> pd.DataFrame:
     df_odom = df.copy()
     df_odom['x_odom'] = 0.0
     df_odom['y_odom'] = 0.0
@@ -80,39 +80,49 @@ def compute_odometry_pure(df: pd.DataFrame) -> pd.DataFrame:
     df_odom['dist_R'] = 0.0
     df_odom['dist_L'] = 0.0
 
-    # Começamos o loop do zero ou de 1, dependendo se a primeira linha já contém movimento
+    # Inicializa com o primeiro valor de ângulo acumulado
+    prev_accumulated_degrees_R = df_odom.loc[0, 'encoderR']
+    prev_accumulated_degrees_L = df_odom.loc[0, 'encoderL']
+ 
     for i in range(1, len(df_odom)):
-        # Pega cálculos de posição anteriores
+        # Pega calculos anteriores
         prev_theta = df_odom.loc[i-1, 'theta_odom']
         prev_x = df_odom.loc[i-1, 'x_odom']
         prev_y = df_odom.loc[i-1, 'y_odom']
         
-        # Agora 'encoderR' e 'encoderL' já são o DELTA (variação) em graus
-        delta_angle_degrees_R = df_odom.loc[i, 'encoderR']
-        delta_angle_degrees_L = df_odom.loc[i, 'encoderL']
+        # Angulo em graus acumulado total neste instante de tempo
+        curr_accumulated_degrees_R = df_odom.loc[i, 'encoderR']
+        curr_accumulated_degrees_L = df_odom.loc[i, 'encoderL']
 
-        # Conversão da variação do angulo de graus do MOTOR para rad da RODA
-        # delta_rad = (graus_motor / gear_ratio) * (pi / 180)
+        # Variação do angulo em graus do ultimo momento para o atual
+        # Ordem correta: delta = atual - anterior
+        delta_angle_degrees_R = curr_accumulated_degrees_R - prev_accumulated_degrees_R
+        delta_angle_degrees_L = curr_accumulated_degrees_L - prev_accumulated_degrees_L
+
+        # Atualizar o acumulado anterior
+        prev_accumulated_degrees_R, prev_accumulated_degrees_L = curr_accumulated_degrees_R, curr_accumulated_degrees_L
+
+        # Conversao da variação do angulo de graus do MOTOR para rad da RODA
+        # Divisão pelo GEAR_RATIO para obter o ângulo da roda
         delta_angle_rad_R = math.radians(delta_angle_degrees_R / GEAR_RATIO)
         delta_angle_rad_L = math.radians(delta_angle_degrees_L / GEAR_RATIO)
 
-        # Cálculo da distância linear percorrida por cada roda
+        # Calculo da distancia
+        # Distância = Ângulo (rad) * Raio da Roda (mm)
         dist_R = delta_angle_rad_R * WHEEL_RADIUS_MM 
         dist_L = delta_angle_rad_L * WHEEL_RADIUS_MM      
         
-        # Odometria diferencial clássica
+        # O restante do cálculo da odometria diferencial
         delta_S = (dist_R + dist_L) / 2.0
         delta_theta = (dist_R - dist_L) / WHEEL_BASE_MM
         
         new_theta = prev_theta + delta_theta
-        # Usamos a média do ângulo para uma integração mais suave (Runge-Kutta de 2ª ordem)
-        theta_avg = prev_theta + (delta_theta / 2.0)
+        theta_avg = prev_theta + delta_theta / 2.0
 
-        # Atualização das coordenadas cartesianas
+        # Correção de convenção (cos para X, sin para Y)
         new_x = prev_x + delta_S * math.cos(theta_avg)
         new_y = prev_y + delta_S * math.sin(theta_avg)
 
-        # Armazenando resultados
         df_odom.loc[i, 'x_odom'] = new_x
         df_odom.loc[i, 'y_odom'] = new_y
         df_odom.loc[i, 'theta_odom'] = new_theta

@@ -22,7 +22,7 @@ GEAR_RATIO = 1.538
 WHEEL_CIRCUMFERENCE_MM = 2.0 * math.pi * WHEEL_RADIUS_MM
 
 # --- Caminhos de arquivos ---
-LOG_FILE = "./data/log.txt"
+LOG_FILE = "./data/dados_mqtt.txt"
 OUTPUT_DIR = "./data/ins"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -104,7 +104,6 @@ def apply_low_pass_filter(data, cutoff_freq, fs, order=2):
 # ================================================================
 
 def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
-    """INS Pura usando a Regra Trapezoidal e Filtro Passa-Baixa."""
     df_ins = df.copy()
     
     # --- PASSO 0: Configuração do Filtro ---
@@ -153,10 +152,16 @@ def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
 
 def plot_trajectories(df: pd.DataFrame, save_path: str):
     plt.figure(figsize=(12, 10))
+
     if 'x_ins' in df.columns:
-        plt.plot(df['x_ins'], df['y_ins'], '-o', markersize=2, linewidth=1.5, label='INS Pura')
-        plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'], 'go', markersize=8, label='Início')
-        plt.plot(df.loc[len(df)-1, 'x_ins'], df.loc[len(df)-1, 'y_ins'], 'ro', markersize=8, label='Fim')
+        plt.plot(df['x_ins'], df['y_ins'], '-o',
+                 markersize=2, linewidth=1.5,
+                 label='INS Pura')
+
+        plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'],
+                 'go', markersize=8, label='Início')
+        plt.plot(df.loc[len(df)-1, 'x_ins'], df.loc[len(df)-1, 'y_ins'],
+                 'ro', markersize=8, label='Fim')
 
     plt.title('INS')
     plt.xlabel('Posição X (mm)')
@@ -164,8 +169,19 @@ def plot_trajectories(df: pd.DataFrame, save_path: str):
     plt.legend()
     plt.grid(True)
     plt.axis('equal')
+
+    # 🔑 Origem (0,0) fixa para comparação entre testes
+    ax = plt.gca()
+    ax.spines['left'].set_position(('data', 0))
+    ax.spines['bottom'].set_position(('data', 0))
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+
     plt.savefig(save_path)
     plt.close()
+
     print(f"Gráfico salvo em: {save_path}")
 
 # ================================================================
