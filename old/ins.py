@@ -15,7 +15,7 @@ from scipy.signal import butter, filtfilt
 # --- Geometria do robô ---
 WHEEL_DIAMETER_MM = 22.0
 WHEEL_RADIUS_MM = WHEEL_DIAMETER_MM / 2.0
-
+WHEEL_BASE_MM = 120.0
 
 # --- Transmissão ---
 GEAR_RATIO = 1.538
@@ -89,24 +89,38 @@ def load_log_data(filepath: str) -> pd.DataFrame:
     df = convert_imu_readings(df)
     return df
 
+# ================================================================
+# 3. FILTRO PASSA-BAIXA
+# ================================================================
+
+def apply_low_pass_filter(data, cutoff_freq, fs, order=2):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff_freq / nyq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    return filtfilt(b, a, data)
 
 # ================================================================
 # 3. CÁLCULO DE INS
 # ================================================================
 
 def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
-    """INS Pura usando a Regra Trapezoidal e Filtro Passa-Baixa."""
     df_ins = df.copy()
     
     # --- PASSO 0: Configuração do Filtro ---
+    # Calculamos a frequência de amostragem (fs) real baseada no log
+    dt_mean = df_ins['timestamp'].diff().mean() * 1e-6
+    fs = 1.0 / dt_mean
+    cutoff = 5.0  # Frequência de corte (5Hz é bom para vibração de motores)
 
-    df_ins['gyro_z_dps'] = df_ins['gyro_z_dps']
-    df_ins['accel_x_ms2'] = df_ins['accel_x_ms2']
-    df_ins['accel_y_ms2'] = df_ins['accel_y_ms2']
+    # --- PASSO 1: Aplicação do Filtro nos dados brutos ---
+    # Filtramos o giro e as acelerações ANTES de começar os cálculos
+    df_ins['gyro_z_dps'] = apply_low_pass_filter(df_ins['gyro_z_dps'].values, cutoff, fs)
+    df_ins['accel_x_ms2'] = apply_low_pass_filter(df_ins['accel_x_ms2'].values, cutoff, fs)
+    df_ins['accel_y_ms2'] = apply_low_pass_filter(df_ins['accel_y_ms2'].values, cutoff, fs)
 
     # 1. Preparação dos dados (agora já filtrados)
     gyro_rad_s = np.radians(df_ins['gyro_z_dps'].to_numpy())
-    time_s = df_ins['timestamp'].to_numpy() * 1e-3
+    time_s = df_ins['timestamp'].to_numpy() * 1e-6 
 
     # 2. Integração do ângulo (Giroscópio -> Theta)
     theta = cumulative_trapezoid(gyro_rad_s, x=time_s, initial=0.0)
@@ -115,29 +129,17 @@ def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Rotação das acelerações para o referencial global
     ax = df_ins['accel_x_ms2'].to_numpy()
     ay = df_ins['accel_y_ms2'].to_numpy()
-    ay_local=-ay
-    ax_local=-ax
     
-    ax_global = ax_local * np.cos(theta) - ay_local * np.sin(theta)
-    ay_global = ax_local * np.sin(theta) + ay_local * np.cos(theta)
-
-
-    df_ins['ax_global_ms2'] = ax_global
-    df_ins['ay_global_ms2'] = ay_global
+    ax_global = ax * np.cos(theta) - ay * np.sin(theta)
+    ay_global = ax * np.sin(theta) + ay * np.cos(theta)
 
     # 4. Integração da aceleração -> velocidade
     vx = cumulative_trapezoid(ax_global, x=time_s, initial=0.0)
     vy = cumulative_trapezoid(ay_global, x=time_s, initial=0.0)
 
-    df_ins['vx_ins_ms'] = vx
-    df_ins['vy_ins_ms'] = vy
-    df_ins['v_ins_ms'] = np.sqrt(vx**2 + vy**2)
-
-
     # 5. Integração da velocidade -> posição (em metros)
     x_m = cumulative_trapezoid(vx, x=time_s, initial=0.0)
     y_m = cumulative_trapezoid(vy, x=time_s, initial=0.0)
-    
 
     # 6. Conversão para mm
     df_ins['x_ins'] = x_m * 1000.0
@@ -148,61 +150,18 @@ def compute_ins_pure(df: pd.DataFrame) -> pd.DataFrame:
 # 4. PLOTAGEM
 # ================================================================
 
-def plot_acc_vel_x(df_ins,  save_path: str):
-    time_s = df_ins['timestamp'] * 1e-3
-
-    fig, ax1 = plt.subplots(figsize=(12, 6))
-
-    ax1.plot(time_s, df_ins['ax_global_ms2'], label='a_x (m/s²)')
-    ax1.set_xlabel('Tempo (s)')
-    ax1.set_ylabel('Aceleração X (m/s²)')
-    ax1.grid(True)
-
-    ax2 = ax1.twinx()
-    ax2.plot(time_s, df_ins['vx_ins_ms'], '--', label='v_x (m/s)')
-    ax2.set_ylabel('Velocidade X (m/s)')
-
-    # Legenda combinada
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-
-    plt.title('Aceleração e Velocidade no Eixo X')
-    plt.savefig(save_path)    
-    plt.tight_layout()  
-    plt.close()
-
-def plot_acc_vel_y(df_ins,  save_path: str):
-    time_s = df_ins['timestamp'] * 1e-3
-
-    fig, ax1 = plt.subplots(figsize=(12, 6))
-
-    ax1.plot(time_s, df_ins['ay_global_ms2'], label='a_y (m/s²)')
-    ax1.set_xlabel('Tempo (s)')
-    ax1.set_ylabel('Aceleração Y (m/s²)')
-    ax1.grid(True)
-
-    ax2 = ax1.twinx()
-    ax2.plot(time_s, df_ins['vy_ins_ms'], '--', label='v_y (m/s)')
-    ax2.set_ylabel('Velocidade Y (m/s)')
-
-    # Legenda combinada
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-
-    plt.title('Aceleração e Velocidade no Eixo Y')
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    print(f"Gráfico salvo em: {save_path}")
-
 def plot_trajectories(df: pd.DataFrame, save_path: str):
     plt.figure(figsize=(12, 10))
+
     if 'x_ins' in df.columns:
-        plt.plot(df['x_ins'], df['y_ins'], '-o', markersize=2, linewidth=1.5, label='INS Pura')
-        plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'], 'go', markersize=8, label='Início')
-        plt.plot(df.loc[len(df)-1, 'x_ins'], df.loc[len(df)-1, 'y_ins'], 'ro', markersize=8, label='Fim')
+        plt.plot(df['x_ins'], df['y_ins'], '-o',
+                 markersize=2, linewidth=1.5,
+                 label='INS Pura')
+
+        plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'],
+                 'go', markersize=8, label='Início')
+        plt.plot(df.loc[len(df)-1, 'x_ins'], df.loc[len(df)-1, 'y_ins'],
+                 'ro', markersize=8, label='Fim')
 
     plt.title('INS')
     plt.xlabel('Posição X (mm)')
@@ -210,8 +169,19 @@ def plot_trajectories(df: pd.DataFrame, save_path: str):
     plt.legend()
     plt.grid(True)
     plt.axis('equal')
+
+    # 🔑 Origem (0,0) fixa para comparação entre testes
+    ax = plt.gca()
+    ax.spines['left'].set_position(('data', 0))
+    ax.spines['bottom'].set_position(('data', 0))
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+
     plt.savefig(save_path)
     plt.close()
+
     print(f"Gráfico salvo em: {save_path}")
 
 # ================================================================
@@ -232,11 +202,7 @@ def main():
     ins_file = os.path.join(OUTPUT_DIR, "ins.csv")
     df_ins.to_csv(ins_file, index=False)
     plot_trajectories(df_ins, os.path.join(OUTPUT_DIR, "ins_image.png"))
-    plot_acc_vel_y(df_ins,  os.path.join(OUTPUT_DIR, "acc_vel_y_image.png"))
-    plot_acc_vel_x(df_ins,  os.path.join(OUTPUT_DIR, "acc_vel_x_image.png"))
     print(f"Dados de odometria salvos em: {ins_file}")
 
 if __name__ == "__main__":
     main()
-
-

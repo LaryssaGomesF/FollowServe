@@ -39,8 +39,8 @@ def map_reading_to_dict(reading: List[Any]) -> Dict[str, Any]:
 
     return {
         'timestamp': reading[0],
-        'encoderR': reading[-2],  # penúltima posição (Ângulo Acumulado R em Graus)
-        'encoderL': reading[-1],  # última posição (Ângulo Acumulado L em Graus)
+        'encoderR': reading[-2],  
+        'encoderL': reading[-1],  
     }
 
 
@@ -71,7 +71,7 @@ def load_log_data(filepath: str) -> pd.DataFrame:
 # 3. CÁLCULO DE ODOMETRIA
 # ================================================================
 
-def compute_odometry_pure(df: pd.DataFrame, window_size: int = 10, alpha: float = 0.3) -> pd.DataFrame:
+def compute_odometry_pure(df: pd.DataFrame) -> pd.DataFrame:
     df_odom = df.copy()
     df_odom['x_odom'] = 0.0
     df_odom['y_odom'] = 0.0
@@ -80,49 +80,39 @@ def compute_odometry_pure(df: pd.DataFrame, window_size: int = 10, alpha: float 
     df_odom['dist_R'] = 0.0
     df_odom['dist_L'] = 0.0
 
-    # Inicializa com o primeiro valor de ângulo acumulado
-    prev_accumulated_degrees_R = df_odom.loc[0, 'encoderR']
-    prev_accumulated_degrees_L = df_odom.loc[0, 'encoderL']
- 
+    # Começamos o loop do zero ou de 1, dependendo se a primeira linha já contém movimento
     for i in range(1, len(df_odom)):
-        # Pega calculos anteriores
+        # Pega cálculos de posição anteriores
         prev_theta = df_odom.loc[i-1, 'theta_odom']
         prev_x = df_odom.loc[i-1, 'x_odom']
         prev_y = df_odom.loc[i-1, 'y_odom']
         
-        # Angulo em graus acumulado total neste instante de tempo
-        curr_accumulated_degrees_R = df_odom.loc[i, 'encoderR']
-        curr_accumulated_degrees_L = df_odom.loc[i, 'encoderL']
+        # Agora 'encoderR' e 'encoderL' já são o DELTA (variação) em graus
+        delta_angle_degrees_R = df_odom.loc[i, 'encoderR']
+        delta_angle_degrees_L = df_odom.loc[i, 'encoderL']
 
-        # Variação do angulo em graus do ultimo momento para o atual
-        # Ordem correta: delta = atual - anterior
-        delta_angle_degrees_R = curr_accumulated_degrees_R - prev_accumulated_degrees_R
-        delta_angle_degrees_L = curr_accumulated_degrees_L - prev_accumulated_degrees_L
-
-        # Atualizar o acumulado anterior
-        prev_accumulated_degrees_R, prev_accumulated_degrees_L = curr_accumulated_degrees_R, curr_accumulated_degrees_L
-
-        # Conversao da variação do angulo de graus do MOTOR para rad da RODA
-        # Divisão pelo GEAR_RATIO para obter o ângulo da roda
+        # Conversão da variação do angulo de graus do MOTOR para rad da RODA
+        # delta_rad = (graus_motor / gear_ratio) * (pi / 180)
         delta_angle_rad_R = math.radians(delta_angle_degrees_R / GEAR_RATIO)
         delta_angle_rad_L = math.radians(delta_angle_degrees_L / GEAR_RATIO)
 
-        # Calculo da distancia
-        # Distância = Ângulo (rad) * Raio da Roda (mm)
+        # Cálculo da distância linear percorrida por cada roda
         dist_R = delta_angle_rad_R * WHEEL_RADIUS_MM 
         dist_L = delta_angle_rad_L * WHEEL_RADIUS_MM      
         
-        # O restante do cálculo da odometria diferencial
+        # Odometria diferencial clássica
         delta_S = (dist_R + dist_L) / 2.0
         delta_theta = (dist_R - dist_L) / WHEEL_BASE_MM
         
         new_theta = prev_theta + delta_theta
-        theta_avg = prev_theta + delta_theta / 2.0
+        # Usamos a média do ângulo para uma integração mais suave (Runge-Kutta de 2ª ordem)
+        theta_avg = prev_theta + (delta_theta / 2.0)
 
-        # Correção de convenção (cos para X, sin para Y)
+        # Atualização das coordenadas cartesianas
         new_x = prev_x + delta_S * math.cos(theta_avg)
         new_y = prev_y + delta_S * math.sin(theta_avg)
 
+        # Armazenando resultados
         df_odom.loc[i, 'x_odom'] = new_x
         df_odom.loc[i, 'y_odom'] = new_y
         df_odom.loc[i, 'theta_odom'] = new_theta
@@ -133,12 +123,17 @@ def compute_odometry_pure(df: pd.DataFrame, window_size: int = 10, alpha: float 
     return df_odom
 
 def plot_trajectories(df: pd.DataFrame, save_path: str):
-    """Gera e salva o gráfico das trajetórias (em mm)."""
     plt.figure(figsize=(12, 10))
+
     if 'x_odom' in df.columns:
-        plt.plot(df['x_odom'], df['y_odom'], '-o', markersize=2, linewidth=1.5, label='1. Odometria Pura (Encoders)')
-        plt.plot(df.loc[0, 'x_odom'], df.loc[0, 'y_odom'], 'go', markersize=8, label='Início')
-        plt.plot(df.loc[len(df)-1, 'x_odom'], df.loc[len(df)-1, 'y_odom'], 'ro', markersize=8, label='Fim')
+        plt.plot(df['x_odom'], df['y_odom'], '-o',
+                 markersize=2, linewidth=1.5,
+                 label='1. Odometria Pura (Encoders)')
+
+        plt.plot(df.loc[0, 'x_odom'], df.loc[0, 'y_odom'],
+                 'go', markersize=8, label='Início')
+        plt.plot(df.loc[len(df)-1, 'x_odom'], df.loc[len(df)-1, 'y_odom'],
+                 'ro', markersize=8, label='Fim')
 
     plt.title('Odometria')
     plt.xlabel('Posição X (mm)')
@@ -146,9 +141,21 @@ def plot_trajectories(df: pd.DataFrame, save_path: str):
     plt.legend()
     plt.grid(True)
     plt.axis('equal')
+
+    # 🔑 fixa o (0,0) como origem visual
+    ax = plt.gca()
+    ax.spines['left'].set_position(('data', 0))
+    ax.spines['bottom'].set_position(('data', 0))
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+
     plt.savefig(save_path)
     plt.close()
+
     print(f"Gráfico salvo em: {save_path}")
+
 
 # ================================================================
 # 4. MAIN
