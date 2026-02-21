@@ -3,8 +3,9 @@ import math
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker  
 from typing import List, Dict, Any
-
+import numpy as np
 # ================================================================
 # 1. PARÂMETROS FÍSICOS E DE CALIBRAÇÃO
 # ================================================================
@@ -133,22 +134,44 @@ def compute_odometry_pure(df: pd.DataFrame, window_size: int = 10, alpha: float 
     return df_odom
 
 def plot_trajectories(df: pd.DataFrame, save_path: str):
-    """Gera e salva o gráfico das trajetórias (em mm)."""
-    plt.figure(figsize=(12, 10))
-    if 'x_odom' in df.columns:
-        plt.plot(df['x_odom'], df['y_odom'], '-o', markersize=2, linewidth=1.5, label='1. Odometria Pura (Encoders)')
-        plt.plot(df.loc[0, 'x_odom'], df.loc[0, 'y_odom'], 'go', markersize=8, label='Início')
-        plt.plot(df.loc[len(df)-1, 'x_odom'], df.loc[len(df)-1, 'y_odom'], 'ro', markersize=8, label='Fim')
+    """Gera o gráfico de Odometria com quadrados de 50mm de tamanho real fixo."""
+    if 'x_odom' not in df.columns:
+        return
+
+    # Cálculo dos limites arredondados para múltiplos de 50
+    margin = 50
+    x_min, x_max = np.floor((df['x_odom'].min() - margin) / 50) * 50, np.ceil((df['x_odom'].max() + margin) / 50) * 50
+    y_min, y_max = np.floor((df['y_odom'].min() - margin) / 50) * 50, np.ceil((df['y_odom'].max() + margin) / 50) * 50
+
+    # Define quantos 'inches' cada 50mm vai ter no arquivo final
+    # 0.5 inches para cada 50 unidades garante que o quadrado tenha sempre o mesmo tamanho
+    res_scale = 0.5 / 50 
+    fig_w = (x_max - x_min) * res_scale
+    fig_h = (y_max - y_min) * res_scale
+
+    plt.figure(figsize=(fig_w, fig_h))
+    ax = plt.gca()
+
+    plt.plot(df['x_odom'], df['y_odom'], '-o', markersize=2, linewidth=1.5, label='1. Odometria Pura (Encoders)')
+    plt.plot(df.loc[0, 'x_odom'], df.loc[0, 'y_odom'], 'go', markersize=8, label='Início')
+    plt.plot(df['x_odom'].iloc[-1], df['y_odom'].iloc[-1], 'ro', markersize=8, label='Fim')
+
+    # Ajuste de Escala e Grid
+    ax.set_aspect('equal', adjustable='box')
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(50))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(50))
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
     plt.title('Odometria')
     plt.xlabel('Posição X (mm)')
     plt.ylabel('Posição Y (mm)')
     plt.legend()
-    plt.grid(True)
-    plt.axis('equal')
-    plt.savefig(save_path)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    
+    plt.savefig(save_path, bbox_inches='tight')
     plt.close()
-    print(f"Gráfico salvo em: {save_path}")
+    print(f"Gráfico Odometria salvo: {save_path}")
 
 # ================================================================
 # 4. MAIN

@@ -7,6 +7,7 @@ import os
 from typing import List, Dict, Any
 from scipy.integrate import cumulative_trapezoid
 from scipy.signal import butter, filtfilt
+import matplotlib.ticker as ticker 
 
 # ================================================================
 # 1. PARÂMETROS FÍSICOS E DE CALIBRAÇÃO
@@ -198,22 +199,43 @@ def plot_acc_vel_y(df_ins,  save_path: str):
     print(f"Gráfico salvo em: {save_path}")
 
 def plot_trajectories(df: pd.DataFrame, save_path: str):
-    plt.figure(figsize=(12, 10))
-    if 'x_ins' in df.columns:
-        plt.plot(df['x_ins'], df['y_ins'], '-o', markersize=2, linewidth=1.5, label='INS Pura')
-        plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'], 'go', markersize=8, label='Início')
-        plt.plot(df.loc[len(df)-1, 'x_ins'], df.loc[len(df)-1, 'y_ins'], 'ro', markersize=8, label='Fim')
+    """Gera o gráfico de INS com quadrados de 50mm de tamanho real fixo."""
+    if 'x_ins' not in df.columns:
+        return
+
+    # Cálculo dos limites arredondados para múltiplos de 50
+    margin = 50
+    x_min, x_max = np.floor((df['x_ins'].min() - margin) / 50) * 50, np.ceil((df['x_ins'].max() + margin) / 50) * 50
+    y_min, y_max = np.floor((df['y_ins'].min() - margin) / 50) * 50, np.ceil((df['y_ins'].max() + margin) / 50) * 50
+
+    # Mantendo a mesma proporção de pixels por mm da função anterior
+    res_scale = 0.5 / 50 
+    fig_w = (x_max - x_min) * res_scale
+    fig_h = (y_max - y_min) * res_scale
+
+    plt.figure(figsize=(fig_w, fig_h))
+    ax = plt.gca()
+
+    plt.plot(df['x_ins'], df['y_ins'], '-o', markersize=2, linewidth=1.5, label='INS Pura')
+    plt.plot(df.loc[0, 'x_ins'], df.loc[0, 'y_ins'], 'go', markersize=8, label='Início')
+    plt.plot(df['x_ins'].iloc[-1], df['y_ins'].iloc[-1], 'ro', markersize=8, label='Fim')
+
+    # Ajuste de Escala e Grid
+    ax.set_aspect('equal', adjustable='box')
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(50))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(50))
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
     plt.title('INS')
     plt.xlabel('Posição X (mm)')
     plt.ylabel('Posição Y (mm)')
     plt.legend()
-    plt.grid(True)
-    plt.axis('equal')
-    plt.savefig(save_path)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    
+    plt.savefig(save_path, bbox_inches='tight')
     plt.close()
-    print(f"Gráfico salvo em: {save_path}")
-
+    print(f"Gráfico INS salvo: {save_path}")
 # ================================================================
 # 5. MAIN
 # ================================================================
